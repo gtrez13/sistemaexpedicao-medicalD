@@ -1,0 +1,23 @@
+# ===== Core Web =====
+Flask==3.0.2
+Werkzeug==3.0.1
+python-dotenv==1.0.1
+gunicorn==21.2.0
+
+# ===== HTTP =====
+requests==2.31.0
+urllib3==2.2.1
+certifi==2024.2.2
+charset-normalizer==3.3.2
+idna==3.6
+
+# ===== PDF =====
+pypdf==4.2.0
+reportlab==4.1.0
+
+# ===== RPA =====
+playwright==1.42.0
+
+
+# ===== Opcional =====
+# weasyprint (instalar só se usar geração HTML→PDF)
