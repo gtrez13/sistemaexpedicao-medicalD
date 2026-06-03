@@ -30,6 +30,21 @@
           Progresso: <span class="p-bip">{{ pedido.total_bipado or 0 }}</span>/<span class="p-tot">{{ pedido.total_quantidade or 0 }}</span>
         </span>
 
+        <!-- Botão Remover Selecionados (aparece só quando tem checkbox marcado) -->
+        <button
+          class="btn btn-outline-danger btn-sm btnx btn-remover-itens"
+          data-ml-id="{{ pedido.ml_id }}"
+          title="Remover itens selecionados deste pedido"
+          style="font-size:0.78rem; padding:3px 10px; display:none;"
+        >🗑 Remover selecionados</button>
+
+        <!-- Botão Arquivar -->
+        <button
+          class="btn btn-outline-warning btn-sm btnx btn-arquivar-pedido"
+          data-ml-id="{{ pedido.ml_id }}"
+          title="Arquivar este pedido"
+          style="font-size:0.78rem; padding:3px 10px;"
+        >📁 Arquivar</button>
       </div>
     </div>
 
@@ -51,7 +66,23 @@
               <div class="itemRow normalItem {% if (item.get('quantidade_bipada',0)|int) >= (item.get('quantidade',0)|int) and (item.get('quantidade',0)|int) > 0 %}is-checked{% endif %}"
                    data-item-name="{{ item.get('nome','')|e }}"
                    data-item-sku="{{ item.get('sku','') }}"
-                   data-ml-id="{{ pedido.ml_id }}">
+                   data-ml-id="{{ pedido.ml_id }}"
+                   data-produto-id="{{ item.get('produto_id', '') }}">
+
+                <!-- Checkbox de seleção -->
+                <label class="item-check-wrap" title="Selecionar para remover" style="
+                    display:flex; align-items:center; cursor:pointer;
+                    padding-right:10px; flex-shrink:0;
+                ">
+                  <input
+                    type="checkbox"
+                    class="item-checkbox"
+                    data-ml-id="{{ pedido.ml_id }}"
+                    data-sku="{{ item.get('sku','') }}"
+                    style="width:16px; height:16px; cursor:pointer; accent-color:#ef4444;"
+                  >
+                </label>
+
                 <div class="itemLeft">
                   <p class="itemName">{{ item.get('nome','') }}</p>
                   <div class="itemMeta">
@@ -82,14 +113,32 @@
           {% for key in groups.keys()|list %}
             {% set its = groups[key] %}
             {% set kit_nome = (its[0].get('parent_nome') or ('KIT ' ~ key)) %}
-            <div class="kitBox">
+            <div class="kitBox" data-kit-sku="{{ key }}" data-ml-id="{{ pedido.ml_id }}">
+              <!-- Checkbox do kit inteiro -->
+              <label class="item-check-wrap" title="Selecionar kit inteiro para remover" style="
+                  display:flex; align-items:center; cursor:pointer;
+                  padding-right:10px; flex-shrink:0; float:left; margin-top:2px;
+              ">
+                <input
+                  type="checkbox"
+                  class="kit-checkbox"
+                  data-ml-id="{{ pedido.ml_id }}"
+                  data-kit-sku="{{ key }}"
+                  style="width:16px; height:16px; cursor:pointer; accent-color:#ef4444;"
+                >
+              </label>
               <p class="kitTitle">📦 {{ kit_nome }}</p>
               <p class="kitSub">SKU do kit: <strong>{{ key }}</strong> • (bipar SKUs abaixo)</p>
+              <div style="clear:both;"></div>
             </div>
 
             {% for item in its %}
-              <div class="itemRow {% if (item.get('quantidade_bipada',0)|int) >= (item.get('quantidade',0)|int) and (item.get('quantidade',0)|int) > 0 %}is-checked{% endif %}" data-item-sku="{{ item.get('sku','') }}" data-ml-id="{{ pedido.ml_id }}">
-                <div class="itemLeft">
+              <div class="itemRow {% if (item.get('quantidade_bipada',0)|int) >= (item.get('quantidade',0)|int) and (item.get('quantidade',0)|int) > 0 %}is-checked{% endif %}"
+                   data-item-sku="{{ item.get('sku','') }}"
+                   data-ml-id="{{ pedido.ml_id }}"
+                   data-kit-parent="{{ key }}">
+
+                <div class="itemLeft" style="padding-left:26px;">
                   <p class="itemName">{{ item.get('nome','') }}</p>
                   <div class="itemMeta">
                     <span class="sku" title="{{ item.get('sku','') }}">{{ item.get('sku','') }}</span>

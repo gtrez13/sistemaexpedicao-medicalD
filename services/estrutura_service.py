@@ -1,14 +1,25 @@
+"""
+EstruturaService — obtém estrutura (componentes) de kits via API Bling v3.
+Não usa Playwright. Cache local (lru_cache) por SKU.
+"""
 from functools import lru_cache
-from services.bling_estrutura_robo import descobrir_estrutura
+
+from services.bling_service import BlingService
+
 
 class EstruturaService:
 
-    # cache evita abrir navegador toda hora
-    @lru_cache(maxsize=300)
-    def obter_estrutura(self, sku: str):
+    @lru_cache(maxsize=500)
+    def obter_estrutura(self, sku: str, nome: str = "") -> list:
+        """
+        Retorna componentes do kit: [{"sku": ..., "nome": ..., "quantidade": ...}]
+        Retorna [] se produto não for kit ou não tiver estrutura cadastrada.
+
+        nome: título do produto (passado como fallback quando sku = ID do ML)
+        """
         try:
-            estrutura = descobrir_estrutura(sku)
-            return estrutura or []
+            bling = BlingService()
+            return bling.obter_estrutura_produto_api(sku, nome=nome)
         except Exception as e:
-            print("Erro ao obter estrutura:", e)
+            print(f"[EstruturaService] obter_estrutura sku={sku}: {e}", flush=True)
             return []

@@ -87,63 +87,95 @@ class BlingService:
     # ------------------------
     # TOKENS
     # ------------------------
-    def _load_tokens(self):
-        with open(self.token_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+    def _load_tokens(self) -> dict:
+        """
+        Carrega tokens na ordem: banco → bling_tokens.json → .env.
+        Garante que sempre haja um acesso_token/refresh_token disponível.
+        """
+        # 1. Tenta banco (bling_tokens table)
+        try:
+            from db import get_db
+            db = get_db()
+            row = db.execute(
+                "SELECT access_token, refresh_token, expires_at FROM bling_tokens WHERE instance = 'principal'"
+            ).fetchone()
+            db.close()
+            if row and row["access_token"] and row["refresh_token"]:
+                expires_at = row["expires_at"]
+                if hasattr(expires_at, "timestamp"):
+                    expires_at = expires_at.timestamp()
+                else:
+                    expires_at = time.time() + 3600
+                return {
+                    "access_token":  row["access_token"],
+                    "refresh_token": row["refresh_token"],
+                    "expires_at":    float(expires_at),
+                }
+        except Exception as e:
+            print(f"[BlingService] DB token load falhou: {e}", flush=True)
 
-    def _get_headers(self):
-        tokens = self._load_tokens()
+        # 2. Tenta bling_tokens.json
+        try:
+            with open(self.token_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if data.get("access_token") and data.get("refresh_token"):
+                    return data
+        except Exception:
+            pass
 
-        # margem de segurança de 60s
-        import time
-        if tokens.get("expires_at", 0) < time.time() + 60:
-            print("🔄 Token expirado, renovando...")
-            tokens = self._refresh_token()
+        # 3. Fallback: .env
+        access  = os.getenv("BLING_ACCESS_TOKEN", "")
+        refresh = os.getenv("BLING_REFRESH_TOKEN", "")
+        if access and refresh:
+            print("[BlingService] ⚠️  Usando tokens do .env como fallback", flush=True)
+            return {
+                "access_token":  access,
+                "refresh_token": refresh,
+                "expires_at":    time.time() + 21600,
+            }
 
-        return {
-            "Authorization": f"Bearer {tokens['access_token']}",
-            "Content-Type": "application/json"
-        }
+        return {}
 
-    def _refresh_token(self):
-        import requests, time, json, os
-
-        tokens = self._load_tokens()
-
-        body = {
-            "grant_type": "refresh_token",
-            "client_id": os.getenv("BLING_CLIENT_ID"),
-            "client_secret": os.getenv("BLING_CLIENT_SECRET"),
-            "refresh_token": tokens["refresh_token"],
-        }
-
-        r = requests.post(
-            "https://api.bling.com.br/Api/v3/oauth/token",
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-
-        r.raise_for_status()
-        data = r.json()
-
-        data["expires_at"] = time.time() + data["expires_in"]
-
-        with open(self.token_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-        return data
-
-    def _save_tokens(self, tokens: dict):
+    def _save_tokens(self, tokens: dict) -> None:
+        """Salva tokens em bling_tokens.json E no banco (se disponível)."""
         tokens["expires_at"] = time.time() + int(tokens.get("expires_in", 3600))
-        with open(self.token_file, "w", encoding="utf-8") as f:
-            json.dump(tokens, f, ensure_ascii=False, indent=2)
+
+        # 1. Salva no arquivo JSON (leitura rápida sem DB)
+        try:
+            with open(self.token_file, "w", encoding="utf-8") as f:
+                json.dump(tokens, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[BlingService] Falha ao salvar {self.token_file}: {e}", flush=True)
+
+        # 2. Salva no banco
+        try:
+            from db import get_db
+            from datetime import datetime, timedelta
+            db = get_db()
+            db.execute("""
+                INSERT INTO bling_tokens (instance, access_token, refresh_token, expires_at)
+                VALUES ('principal', ?, ?, ?)
+                ON CONFLICT (instance) DO UPDATE SET
+                    access_token  = EXCLUDED.access_token,
+                    refresh_token = EXCLUDED.refresh_token,
+                    expires_at    = EXCLUDED.expires_at,
+                    updated_at    = NOW()
+            """, (
+                tokens.get("access_token"),
+                tokens.get("refresh_token"),
+                datetime.utcnow() + timedelta(seconds=int(tokens.get("expires_in", 21600))),
+            ))
+            db.commit()
+            db.close()
+        except Exception as e:
+            print(f"[BlingService] Falha ao salvar tokens no banco: {e}", flush=True)
 
     def _basic_auth(self) -> str:
         raw = f"{self.client_id}:{self.client_secret}".encode("utf-8")
         return base64.b64encode(raw).decode("utf-8")
 
     def _refresh_access_token(self, refresh_token: str) -> str:
-        url = "https://api.bling.com.br/Api/v3/oauth/token"
+        url = "https://www.bling.com.br/Api/v3/oauth/token"
         headers = {
             "Authorization": f"Basic {self._basic_auth()}",
             "Content-Type": "application/x-www-form-urlencoded",
@@ -163,7 +195,7 @@ class BlingService:
 
         access = tokens.get("access_token")
         refresh = tokens.get("refresh_token")
-        expires_at = float(tokens.get("expires_at", 0))
+        expires_at = float(tokens.get("expires_at", time.time() + tokens.get("expires_in", 3600)))
 
         # renova faltando 5 minutos
         if time.time() > (expires_at - 300):
@@ -179,7 +211,10 @@ class BlingService:
         return access
 
     def _headers(self) -> dict:
-        return {"Authorization": f"Bearer {self.get_access_token()}"}
+        return {
+            "Authorization": f"Bearer {self.get_access_token()}",
+            "Content-Type": "application/json"
+        }
 
     # ------------------------
     # HTTP helpers (com retry 429)
@@ -243,12 +278,23 @@ class BlingService:
         return r.json() or {}
 
     def _download(self, url: str) -> bytes:
-        if not url:
-            return b""
-        r = self._request("GET", url, timeout=(10, 120))
-        if r.status_code != 200:
-            raise Exception(f"❌ Download falhou: {r.status_code} - {r.text[:300]}")
-        return r.content or b""
+            if not url:
+                return b""
+            # URLs pré-assinadas do S3 já têm auth na query string (X-Amz-Algorithm).
+            # Adicionar Authorization header causa 400 "Only one auth mechanism allowed".
+            url_lower = url.lower()
+            is_s3 = (
+                "x-amz-algorithm" in url_lower
+                or "amazonaws.com" in url_lower
+                or "x-amz-signature" in url_lower
+            )
+            if is_s3:
+                r = requests.get(url, timeout=(10, 120))
+            else:
+                r = self._request("GET", url, timeout=(10, 120))
+            if r.status_code != 200:
+                raise Exception(f"❌ Download falhou: {r.status_code} - {r.text[:300]}")
+            return r.content or b""
 
     # ============================================================
     # ESTOQUE (API v3)
@@ -357,6 +403,95 @@ class BlingService:
     # ============================================================
     # KIT / ESTRUTURA (API v3)
     # ===========================================================
+
+    def obter_estrutura_produto_api(self, sku: str, nome: str = "") -> list:
+        """
+        Retorna componentes do kit via Bling API v3.
+        [{"sku": str, "nome": str, "quantidade": int}]
+        Retorna [] se não for kit ou produto não encontrado.
+        """
+        sku_in = (sku or "").strip()
+        if not sku_in:
+            return []
+
+        cached = self._kit_cache.get(sku_in)
+        if cached is not None:
+            return cached[2]
+
+        try:
+            # 1) Localiza produto_id pelo código/SKU
+            data = self._get_json("/produtos", params={"codigo": sku_in})
+            itens = data.get("data") or []
+
+            # ID numérico do ML sem seller_sku → tenta pelo nome
+            if not itens and sku_in.isdigit() and len(sku_in) >= 10 and nome:
+                data = self._get_json("/produtos", params={"nome": nome[:40], "limite": 10})
+                itens = data.get("data") or []
+
+            if not isinstance(itens, list) or not itens:
+                self._kit_cache[sku_in] = (False, sku_in, [])
+                return []
+
+            produto = next(
+                (p for p in itens if str(p.get("codigo") or "").strip() == sku_in),
+                itens[0]
+            )
+            produto_id = produto.get("id")
+            if not produto_id:
+                self._kit_cache[sku_in] = (False, sku_in, [])
+                return []
+
+            # 2) Detalhe do produto — campo estrutura
+            detalhe = self._get_json(f"/produtos/{produto_id}")
+            prod_data = detalhe.get("data") or {}
+            estrutura_obj = prod_data.get("estrutura") or {}
+            if isinstance(estrutura_obj, dict):
+                estrutura_raw = estrutura_obj.get("componentes") or []
+            elif isinstance(estrutura_obj, list):
+                estrutura_raw = estrutura_obj
+            else:
+                estrutura_raw = []
+
+            if not isinstance(estrutura_raw, list) or not estrutura_raw:
+                self._kit_cache[sku_in] = (False, str(produto_id), [])
+                return []
+
+            # 3) Mapeia componentes - se SKU vier vazio, busca o produto pelo ID
+            componentes = []
+            for comp in estrutura_raw:
+                if not isinstance(comp, dict):
+                    continue
+                comp_prod = comp.get("produto") or {}
+                comp_sku = str(comp_prod.get("codigo") or "").strip()
+                comp_nome = str(comp_prod.get("nome") or comp_prod.get("descricao") or "").strip()
+                comp_id = comp_prod.get("id")
+                # Se não tem codigo/nome mas tem id, busca o produto
+                if (not comp_sku or not comp_nome) and comp_id:
+                    try:
+                        det = self._get_json(f"/produtos/{comp_id}")
+                        det_data = det.get("data") or {}
+                        if not comp_sku:
+                            comp_sku = str(det_data.get("codigo") or comp_id).strip()
+                        if not comp_nome:
+                            comp_nome = str(det_data.get("nome") or "").strip()
+                    except Exception as e:
+                        print(f"[BlingService] erro ao buscar componente {comp_id}: {e}", flush=True)
+                        if not comp_sku:
+                            comp_sku = str(comp_id)
+                try:
+                    comp_qtd = int(comp.get("quantidade") or 1)
+                except (TypeError, ValueError):
+                    comp_qtd = 1
+                if comp_sku:
+                    componentes.append({"sku": comp_sku, "nome": comp_nome, "quantidade": comp_qtd})
+
+            self._kit_cache[sku_in] = (bool(componentes), str(produto_id), componentes)
+            return componentes
+
+        except Exception as e:
+            print(f"[BlingService] obter_estrutura_produto_api sku={sku_in}: {e}", flush=True)
+            self._kit_cache[sku_in] = (False, sku_in, [])
+            return []
 
     def resolver_pv_por_codigo_digitado(ml_service, bling_service, codigo_digitado: str):
         print("\n🔎 TRADUZINDO ID DO MERCADO LIVRE...")
@@ -1332,38 +1467,38 @@ class BlingService:
         raise Exception(f"❌ Bling atualizar NF-e falhou: {r.status_code} - {r.text}")
 
     def baixar_danfe_simplificado_por_nfe(self, nfe_id: int) -> bytes:
-        det = self._get_json(f"/nfe/{int(nfe_id)}")
-        obj = det.get("data") or det
+            det = self._get_json(f"/nfe/{int(nfe_id)}")
+            obj = det.get("data") or det
 
-        keys_pref = {
-            "linkdanfesimplificadoetiqueta",
-            "linkdanfeetiqueta",
-            "linkimpressaodanfeetiqueta",
-            "linkdanfesimplificado",
-            "linkdanfesimplificada",
-            "linkdanfesimpl",
-            "linkimpressaodanfe",
-            "linkdanfe",
-            "linkpdf",
-            "linkpdfdanfe",
-            "linkdanfepdf",
-        }
+            # Tenta linkPDF primeiro (retorna PDF direto, sem HTML)
+            link = None
+            for key in ("linkPDF", "linkPdf", "linkpdf"):
+                v = obj.get(key)
+                if isinstance(v, str) and v.strip():
+                    link = v.strip()
+                    break
 
-        link = self._find_first_key_like(obj, keys_pref)
-        if not link:
-            link = self._find_first_url_containing(obj, "simpl")
-        if not link:
-            link = self._find_first_url_containing(obj, "danfe")
-        if not link:
-            link = self._find_first_url_containing(obj, ".pdf")
+            if not link:
+                keys_pref = {
+                    "linkdanfesimplificadoetiqueta", "linkdanfeetiqueta",
+                    "linkimpressaodanfeetiqueta", "linkdanfesimplificado",
+                    "linkdanfesimplificada", "linkdanfesimpl",
+                    "linkimpressaodanfe", "linkdanfe",
+                    "linkpdfdanfe", "linkdanfepdf",
+                }
+                link = self._find_first_key_like(obj, keys_pref)
 
-        if not link:
-            raise Exception("NF-e não retornou link de DANFE/PDF (nem simplificado).")
+            if not link:
+                link = self._find_first_url_containing(obj, "danfe")
+            if not link:
+                link = self._find_first_url_containing(obj, ".pdf")
+            if not link:
+                raise Exception("NF-e não retornou link de DANFE/PDF.")
 
-        content = self._download(str(link).strip())
-        if not content:
-            raise Exception("Download do DANFE retornou vazio.")
-        return content
+            content = self._download(str(link).strip())
+            if not content:
+                raise Exception("Download do DANFE retornou vazio.")
+            return content
 
     def baixar_danfe_por_pedido_venda(self, bling_pv_id: int, numero_loja: str | None = None) -> tuple[bytes, str]:
         pv_resp = self._get_json(f"/pedidos/vendas/{int(bling_pv_id)}")
@@ -1647,59 +1782,42 @@ class BlingService:
         pv_resp = self._get_json(f"/pedidos/vendas/{pv_id}")
         pv = pv_resp.get("data") or pv_resp
         if not isinstance(pv, dict):
-            raise Exception("PV inválido")
+            raise Exception("PV invalido")
 
-        # -------------------------
-        # 1) Natureza (obrigatório em muitas contas)
-        # -------------------------
-        natureza_id = None
-        # tenta achar no PV em vários formatos
-        nat = pv.get("naturezaOperacao") or pv.get("natureza") or {}
-        if isinstance(nat, dict):
-            natureza_id = nat.get("id") or nat.get("idNaturezaOperacao")
-
+        # env var TEM PRIORIDADE — PV pode ter natureza errada (ex: Compra)
+        natureza_id = (os.getenv("BLING_NFE_NATUREZA_ID") or "").strip() or None
         if not natureza_id:
-            natureza_id = (os.getenv("BLING_NFE_NATUREZA_ID") or "").strip() or None
-
+            nat = pv.get("naturezaOperacao") or pv.get("natureza") or {}
+            if isinstance(nat, dict):
+                natureza_id = nat.get("id") or nat.get("idNaturezaOperacao")
         if not natureza_id:
             raise Exception("Sem idNaturezaOperacao. Defina BLING_NFE_NATUREZA_ID no .env")
 
-        # -------------------------
-        # 2) Destinatário/contato completo (muito comum ser obrigatório)
-        # -------------------------
         contato = pv.get("contato") or {}
+        contato_id = contato.get("id")
         numero_documento = (contato.get("numeroDocumento") or "").strip()
-        if not numero_documento:
-            raise Exception("PV sem contato.numeroDocumento (CPF/CNPJ)")
+        if not numero_documento and not contato_id:
+            raise Exception("PV sem contato")
 
         nome = (contato.get("nome") or "").strip()
         tipo = (contato.get("tipoPessoa") or "F").strip()
-
-        # Endereço (no seu PV tem tudo)
-        end = contato.get("endereco") or pv.get("enderecoEntrega") or pv.get("endereco") or {}
-        # tenta também variações
+        end = contato.get("endereco") or pv.get("enderecoEntrega") or {}
         endereco_nf = {
             "cep": (end.get("cep") or "").strip(),
             "uf": (end.get("uf") or "").strip(),
             "municipio": (end.get("municipio") or end.get("cidade") or "").strip(),
             "bairro": (end.get("bairro") or "").strip(),
             "endereco": (end.get("endereco") or end.get("logradouro") or "").strip(),
-            "numero": (str(end.get("numero") or "").strip()),
+            "numero": str(end.get("numero") or "").strip(),
             "complemento": (end.get("complemento") or "").strip(),
         }
 
-        # -------------------------
-        # 3) Datas
-        # -------------------------
         data_op = (pv.get("data") or pv.get("dataVenda") or pv.get("dataEmissao") or "").strip()
         if isinstance(data_op, str) and "T" in data_op:
             data_op = data_op.split("T")[0]
         if not data_op:
             data_op = datetime.now().strftime("%Y-%m-%d")
 
-        # -------------------------
-        # 4) Itens (tenta mandar o máximo possível)
-        # -------------------------
         itens_pv = pv.get("itens") or []
         if not itens_pv:
             raise Exception("PV sem itens")
@@ -1709,67 +1827,71 @@ class BlingService:
             obj = it.get("item") if isinstance(it, dict) and isinstance(it.get("item"), dict) else it
             if not isinstance(obj, dict):
                 continue
+            produto_obj = obj.get("produto") if isinstance(obj.get("produto"), dict) else {}
+            produto_id = produto_obj.get("id") or obj.get("idProduto") or obj.get("produtoId")
+            codigo = obj.get("codigo") or obj.get("codigoProduto") or obj.get("sku") or produto_obj.get("codigo")
+            qtd = float(str(obj.get("quantidade") or 1).replace(",", "."))
+            valor = float(str(obj.get("valor") or obj.get("preco") or 0).replace(",", "."))
 
-            codigo = (obj.get("codigo") or obj.get("codigoProduto") or obj.get("sku") or "").strip()
-            if not codigo:
-                continue
-
-            qtd = obj.get("quantidade") or obj.get("qtde") or obj.get("qtd") or 1
-            valor = obj.get("valor") or obj.get("preco") or obj.get("valorUnitario") or obj.get("valor_unitario") or 0
-
-            try:
-                qtd = float(str(qtd).replace(",", "."))
-            except Exception:
-                qtd = 1.0
-
-            try:
-                valor = float(str(valor).replace(",", "."))
-            except Exception:
-                valor = 0.0
-
-            # Se sua conta exigir NCM/CFOP/CSOSN, o ideal é buscar do cadastro do produto.
-            # Aqui vai “mínimo + deixa Bling calcular via natureza” (se ele conseguir).
             item_nf = {
-                "codigo": codigo,
+                "codigo": str(codigo).strip() if codigo else "",
                 "quantidade": qtd,
                 "valor": valor,
             }
 
+            # Busca NCM — tenta por produto_id primeiro, depois por codigo
+            ncm = None
+            origem = None
+            pid_fiscal = produto_id
+
+            if not pid_fiscal and codigo:
+                try:
+                    s = self._get_json("/produtos", params={"codigo": str(codigo)})
+                    itens_prod = s.get("data") or []
+                    if itens_prod:
+                        pid_fiscal = itens_prod[0].get("id")
+                except Exception:
+                    pass
+
+            if pid_fiscal:
+                try:
+                    pd = self._get_json(f"/produtos/{int(pid_fiscal)}")
+                    trib = (pd.get("data") or {}).get("tributacao") or {}
+                    ncm = trib.get("ncm")
+                    origem = trib.get("origem")
+                except Exception as e:
+                    print(f"Aviso fiscal produto {pid_fiscal}: {e}", flush=True)
+
+            if produto_id:
+                item_nf["produto"] = {"id": int(produto_id)}
+            elif codigo:
+                item_nf["produto"] = {"codigo": str(codigo).strip()}
+            else:
+                continue
+
+            if ncm or origem is not None:
+                ncm_clean = str(ncm).replace(".", "").replace("-", "").strip() if ncm else None
+                item_nf["tributacao"] = {}
+                if ncm_clean:
+                    item_nf["tributacao"]["ncm"] = ncm_clean
+                if origem is not None:
+                    item_nf["tributacao"]["origem"] = int(origem)
+
             itens_nf.append(item_nf)
 
         if not itens_nf:
-            raise Exception("Não consegui montar itens NF-e")
+            raise Exception("Sem itens validos")
 
-        # -------------------------
-        # 5) Frete / modalidade (no seu PV é FOB)
-        # -------------------------
-        # Bling costuma usar modalidadeFrete = 1 (FOB) ou equivalente.
-        # Se sua conta não exigir, ele ignora; se exigir, ajuda.
-        frete_mode = 1  # FOB
-
-        # -------------------------
-        # 6) Payload final (mais completo)
-        # -------------------------
         payload = {
             "idPedidoVenda": pv_id,
             "idNaturezaOperacao": int(natureza_id),
-
             "dataOperacao": data_op,
-
-            "contato": {
-                "nome": nome,
-                "numeroDocumento": numero_documento,
-                "tipoPessoa": tipo,
-                "endereco": endereco_nf,
-            },
-
             "itens": itens_nf,
-
-            # ajuda em contas que travam por frete
-            "transporte": {
-                "modalidadeFrete": frete_mode
-            },
         }
+        if contato_id:
+            payload["contato"] = {"id": int(contato_id)}
+        else:
+            payload["contato"] = {"nome": nome, "numeroDocumento": numero_documento, "tipoPessoa": tipo, "endereco": endereco_nf}
 
         r = self._post("/nfe", json=payload, timeout=(10, 90))
         if r.status_code not in (200, 201):
@@ -1781,8 +1903,7 @@ class BlingService:
         if not nfe_id:
             nfe_id = _find_first_int_key_like(data, {"id"})
         if not nfe_id:
-            raise Exception(f"❌ Bling não retornou id da NF-e ao criar. Resp: {data}")
-
+            raise Exception(f"❌ Bling nao retornou id. Resp: {data}")
         return int(nfe_id)
 
     def enviar_nfe(self, nfe_id: int, enviar_email: bool = False):
@@ -2073,13 +2194,18 @@ class BlingService:
 
     def obter_modulo_id_pedidos_vendas(self) -> int | None:
         mods = self.listar_modulos_situacoes()
-        for m in mods:
-            nome = str(m.get("nome") or m.get("descricao") or "").strip().lower()
-            # tenta bater por texto (depende da conta/idioma)
-            if "pedido" in nome and "venda" in nome:
-                mid = _safe_int(m.get("id"))
-                if mid:
-                    return int(mid)
+        # Prioridade: "Vendas" > qualquer módulo com "pedido"+"venda" > "vendas"
+        for alvo in (
+            lambda n: n == "vendas",
+            lambda n: "pedido" in n and "venda" in n,
+            lambda n: "venda" in n,
+        ):
+            for m in mods:
+                nome = str(m.get("nome") or m.get("descricao") or "").strip().lower()
+                if alvo(nome):
+                    mid = _safe_int(m.get("id"))
+                    if mid:
+                        return int(mid)
         return None
 
     def obter_situacao_id_por_nome(self, id_modulo: int, nome_alvo: str) -> int | None:
@@ -2281,3 +2407,185 @@ class BlingService:
                     return True
 
         return False
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # VENDAS INTERNAS
+    # ────────────────────────────────────────────────────────────────────────────
+
+    # Situações que indicam pedido JÁ CONCLUÍDO ou CANCELADO — ignorar no sync.
+    # Todos os outros (Em aberto=6, Em andamento=15, Em digitação=21, etc.) são importados.
+    SITUACOES_IGNORAR = {9, 12}   # 9=Atendido, 12=Cancelado
+
+    def buscar_vendas_internas(self, dias: int = 30) -> list[dict]:
+        """
+        Lista Pedidos de Venda do Bling com situação "Em andamento" (sit_id=15)
+        que NÃO vieram do Mercado Livre.
+        Busca os últimos `dias` dias (padrão 30).
+
+        Retorna lista de dicts normalizados para inserção na tabela pedidos.
+        """
+        import re
+        from datetime import datetime, timedelta, date
+
+        _ml_pat = re.compile(r"^\d{15,}$")
+
+        data_ini_param = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%d")
+        data_fim_param = date.today().strftime("%Y-%m-%d")
+
+        result: list[dict] = []
+        vistos: set[int] = set()
+        max_pags = 20
+        pagina   = 1
+
+        while pagina <= max_pags:
+            try:
+                resp = self._get_json(
+                    "/pedidos/vendas",
+                    params={
+                        "pagina":         pagina,
+                        "limite":         100,
+                        "dataInicial":    data_ini_param,
+                        "dataFinal":      data_fim_param,
+                        "idsSituacoes[]": 15,   # 15 = Em andamento
+                    },
+                    timeout=(10, 30),
+                )
+            except Exception as e:
+                print(f"[COMERCIAL] Falha ao listar PVs pag={pagina}: {e}", flush=True)
+                break
+
+            itens = resp.get("data") or []
+            if not itens:
+                break
+
+            for pv in itens:
+                if not isinstance(pv, dict):
+                    continue
+
+                # Proteção extra: ignora pedidos do ML (numeroLoja com 15+ dígitos)
+                numero_loja = str(pv.get("numeroLoja") or "").strip()
+                if _ml_pat.match(numero_loja):
+                    continue
+
+                pv_id = pv.get("id")
+                if not pv_id:
+                    continue
+
+                pv_id_int = int(pv_id)
+                if pv_id_int in vistos:
+                    continue
+                vistos.add(pv_id_int)
+
+                contato = pv.get("contato") or {}
+                cliente_nome = str(
+                    contato.get("nome") or contato.get("fantasia") or "CLIENTE"
+                ).strip()[:120]
+
+                try:
+                    detalhe  = self._get_json(f"/pedidos/vendas/{pv_id_int}")
+                    data_pv  = detalhe.get("data") or detalhe
+                    itens_pv = data_pv.get("itens") if isinstance(data_pv, dict) else []
+                except Exception as e:
+                    print(f"[COMERCIAL] Falha ao detalhar PV {pv_id_int}: {e}", flush=True)
+                    itens_pv = []
+
+                produtos: list[dict] = []
+                for it in (itens_pv or []):
+                    if not isinstance(it, dict):
+                        continue
+                    # Bling v3: item pode vir direto ou dentro de {"item": {...}}
+                    item = it.get("item") if isinstance(it.get("item"), dict) else it
+                    sku  = str(
+                        item.get("codigo") or item.get("sku") or
+                        (item.get("produto") or {}).get("codigo") or ""
+                    ).strip()
+                    # Bling v3: campo de nome é "descricao"
+                    nome = str(
+                        item.get("descricao") or
+                        item.get("descricaoDetalhada") or
+                        item.get("nome") or
+                        sku
+                    ).strip()
+                    qtd = max(1, int(it.get("quantidade") or item.get("quantidade") or 1))
+                    if sku:
+                        produtos.append({"sku": sku, "nome": nome, "quantidade": qtd})
+
+                bling_numero = str(pv.get("numero") or "").strip() or None
+
+                result.append({
+                    "ml_id":                 f"BLINGPV_{pv_id_int}",
+                    "cliente_nome":          cliente_nome,
+                    "logistic_type":         "COMERCIAL",
+                    "origem":                "COMERCIAL",
+                    "bling_pedido_venda_id": pv_id_int,
+                    "bling_numero":          bling_numero,
+                    "produtos":              produtos,
+                })
+
+            if len(itens) < 100:
+                break
+            pagina += 1
+
+        print(f"[COMERCIAL] {len(result)} vendas internas encontradas (ultimos {dias}d, sit=15)", flush=True)
+        return result
+
+    def sync_produtos_dimensoes(
+        self,
+        skus: list[str] | None = None,
+        *,
+        limit: int = 50,
+    ) -> dict:
+        """
+        Busca dimensoes (peso, altura, largura, profundidade) no Bling para
+        cada SKU da lista (ou todos os produtos da tabela local se skus=None)
+        e atualiza as colunas peso_kg/altura_cm/largura_cm/comprimento_cm.
+
+        Retorna { "atualizados": N, "sem_dimensoes": M, "erros": K }.
+        """
+        from db import get_db
+
+        db = get_db()
+
+        if skus is None:
+            rows = db.execute("SELECT sku FROM produtos ORDER BY sku").fetchall()
+            skus = [r["sku"] for r in rows]
+
+        skus = skus[:limit]
+        atualizados = 0
+        sem_dimensoes = 0
+        erros = 0
+
+        for sku in skus:
+            try:
+                data = self._get_json("/produtos", params={"codigo": sku, "limite": 1})
+                itens = data.get("data") or []
+                if not itens:
+                    sem_dimensoes += 1
+                    continue
+
+                prod = itens[0]
+                peso = float(prod.get("peso") or 0) or None
+                alt  = float(prod.get("altura")     or 0) or None
+                lar  = float(prod.get("largura")    or 0) or None
+                prof = float(prod.get("profundidade") or 0) or None
+
+                if any(v is not None for v in (peso, alt, lar, prof)):
+                    db.execute("""
+                        UPDATE produtos
+                        SET peso_kg        = ?,
+                            altura_cm      = ?,
+                            largura_cm     = ?,
+                            comprimento_cm = ?
+                        WHERE sku = ?
+                    """, (peso, alt, lar, prof, sku))
+                    db.commit()
+                    atualizados += 1
+                else:
+                    sem_dimensoes += 1
+
+            except Exception as e:
+                erros += 1
+                print(f"[DIM] Falha em {sku}: {e}", flush=True)
+
+        db.close()
+        return {"atualizados": atualizados, "sem_dimensoes": sem_dimensoes, "erros": erros}

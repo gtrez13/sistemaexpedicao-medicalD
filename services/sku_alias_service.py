@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Optional
-from db.database import get_db
+from db import get_db
 
 
 class SkuAliasService:

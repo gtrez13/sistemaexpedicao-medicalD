@@ -86,21 +86,35 @@ class MercadoLivreService:
     Ignora fulfillment.
     """
 
-    def __init__(self):
+    def __init__(self, conta: dict | None = None):
         self.base_url = "https://api.mercadolibre.com"
-        self.client_id = os.getenv("ML_APP_ID")
-        self.client_secret = os.getenv("ML_APP_SECRET")
-        self.access_token = os.getenv("ML_ACCESS_TOKEN")
-        self.refresh_token = os.getenv("ML_REFRESH_TOKEN")
-        self.user_id = os.getenv("ML_SELLER_ID")
+
+        if conta:
+            # app_id/secret DESTA conta (cada loja pode ter app próprio)
+            self.client_id     = conta.get("ml_app_id")     or os.getenv("ML_APP_ID")
+            self.client_secret = conta.get("ml_app_secret") or os.getenv("ML_APP_SECRET")
+            self.access_token  = conta.get("ml_access_token")  or os.getenv("ML_ACCESS_TOKEN")
+            self.refresh_token = conta.get("ml_refresh_token") or os.getenv("ML_REFRESH_TOKEN")
+            self.user_id       = str(conta.get("ml_user_id")   or os.getenv("ML_SELLER_ID") or "")
+            self._conta_id     = conta.get("id")
+            self._conta_nome   = conta.get("nome", "LHVMED 1")
+        else:
+            self.client_id     = os.getenv("ML_APP_ID")
+            self.client_secret = os.getenv("ML_APP_SECRET")
+            self.access_token  = os.getenv("ML_ACCESS_TOKEN")
+            self.refresh_token = os.getenv("ML_REFRESH_TOKEN")
+            self.user_id       = os.getenv("ML_SELLER_ID")
+            self._conta_id     = None
+            self._conta_nome   = "LHVMED 1"
 
         if not all([self.client_id, self.client_secret, self.access_token, self.refresh_token, self.user_id]):
-            print("⚠️ ML: Variáveis incompletas no .env", flush=True)
+            print("ML: Variaveis incompletas no .env ou na conta", flush=True)
 
-        self._shipment_cache: dict[str, dict | None] = {}
-        self._invoice_cache: dict[str, bool] = {}
-        self._items_cache: dict[str, dict] = {}  # item_id -> {sku,title, seller_custom_field, seller_sku}
-        self._variation_cache: dict[tuple[str, str], str | None] = {}  # (item_id, variation_id) -> sku
+        self._shipment_cache:  dict[str, dict | None] = {}
+        self._invoice_cache:   dict[str, bool]        = {}
+        self._items_cache:     dict[str, dict]        = {}
+        self._variation_cache: dict[tuple[str, str], str | None] = {}
+        self._token_renovado   = False   # renova no máximo 1x por instância
 
     def _headers(self):
         return {"Authorization": f"Bearer {self.access_token}", "Content-Type": "application/json"}
@@ -268,9 +282,9 @@ class MercadoLivreService:
     def renovar_token(self):
         url = f"{self.base_url}/oauth/token"
         payload = {
-            "grant_type": "refresh_token",
-            "client_id": self.client_id,
-            "client_secret": self.client_secret,
+            "grant_type":    "refresh_token",
+            "client_id":     self.client_id,      # app_id DA conta, não o global
+            "client_secret": self.client_secret,   # app_secret DA conta
             "refresh_token": self.refresh_token,
         }
         r = requests.post(url, data=payload, timeout=(10, 60))
@@ -278,20 +292,50 @@ class MercadoLivreService:
             raise Exception(f"ML refresh falhou: {r.status_code} - {r.text}")
 
         data = r.json()
-        self.access_token = data["access_token"]
+        self.access_token  = data["access_token"]
         self.refresh_token = data.get("refresh_token", self.refresh_token)
-        set_key(ENV_PATH, "ML_ACCESS_TOKEN", self.access_token)
-        set_key(ENV_PATH, "ML_REFRESH_TOKEN", self.refresh_token)
+
+        self._token_renovado = True   # marca: já renovamos nesta instância
+
+        if self._conta_id:
+            # Multi-conta: persiste no banco, não no .env
+            try:
+                import psycopg2
+                from datetime import datetime, timezone, timedelta
+                conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+                conn.autocommit = True
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE contas_marketplace
+                    SET ml_access_token=%s, ml_refresh_token=%s,
+                        ml_expires_at=NOW() + INTERVAL '6 hours',
+                        updated_at=NOW()
+                    WHERE id=%s
+                """, (self.access_token, self.refresh_token, self._conta_id))
+                conn.close()
+                print(f"[ML {self._conta_nome}] Token renovado no banco.", flush=True)
+            except Exception as e:
+                print(f"[ML {self._conta_nome}] Token renovado em memória (banco falhou: {e})", flush=True)
+        else:
+            # Conta padrão: persiste no .env (comportamento original)
+            set_key(ENV_PATH, "ML_ACCESS_TOKEN",  self.access_token)
+            set_key(ENV_PATH, "ML_REFRESH_TOKEN", self.refresh_token)
+
         return True
 
     def _request(self, method, endpoint, params=None):
         url = f"{self.base_url}{endpoint}"
-        for _ in range(3):
+        for attempt in range(3):
             try:
                 r = requests.request(method, url, headers=self._headers(), params=params, timeout=(10, 60))
                 if r.status_code == 401:
-                    self.renovar_token()
-                    continue
+                    if not self._token_renovado:
+                        # Renova apenas 1 vez por instância — evita loop com 401 persistente
+                        self.renovar_token()
+                        continue
+                    # 401 mesmo após renovação: não renova de novo, devolve None
+                    print(f"[ML {self._conta_nome}] 401 persistente após renovação em {endpoint}", flush=True)
+                    return None
                 return r
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
                 time.sleep(1)
@@ -651,18 +695,13 @@ class MercadoLivreService:
                 var_id = oi.get("variation_id") or (oi.get("item") or {}).get("variation_id")
                 var_sku = self._get_variation_sku(item_id, var_id) if (item_id and var_id) else None
 
-                # ✅ prioridade: SKU da variação > SKU do item pai
+                # prioridade: SKU da variação > SKU do item > seller_sku existente > item_id
                 if var_sku:
                     oi["seller_sku"] = var_sku
                 elif real_sku:
                     oi["seller_sku"] = real_sku
                 else:
                     oi["seller_sku"] = oi.get("seller_sku") or (item_id or "SEM_SKU")
-
-                    if var_sku:
-                        oi["seller_sku"] = var_sku
-                    else:
-                        oi["seller_sku"] = oi.get("seller_sku") or (item_id or "SEM_SKU")
 
                 if (not item.get("title")) and real_title:
                     item["title"] = real_title

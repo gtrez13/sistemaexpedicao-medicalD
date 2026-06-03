@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+downloads/
+*.pdf
+*.zpl
+*.log
+frontend/node_modules/
+bling_tokens.json
+session_data/
+*.db
+browser_data/

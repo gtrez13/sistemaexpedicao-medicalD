@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_macros.html" import order_card %}
 
-{% block title %}MEDICALD | Expedição{% endblock %}
+{% block title %}MedicalD | Expedição{% endblock %}
 
 {% block content %}
 <div class="container wrap py-4">
@@ -13,7 +13,7 @@
         <p class="brand">
           <span class="dot" aria-hidden="true"></span>
           <span class="brandMark" aria-label="MEDICALD">
-            <span class="brandWhite">Medical</span>D<span class="brandBlue"></span>
+            <span class="brandWhite">MedicalD</span><span class="brandBlue"></span>
           </span>
           <span class="divider">•</span>
           <span class="pageName">Expedição</span>
@@ -23,7 +23,7 @@
 
       <div class="brandRowRight d-flex align-items-center gap-2 flex-wrap">
         <a href="/scanner" class="btn btn-outline-dark btnx btn-ghost">Conferência</a>
-
+        <a href="/arquivados" class="btn btn-outline-secondary btnx btn-ghost">📁 Arquivados</a>
         <span class="pill pill-strong">Pedidos: {{ pedidos|length }}</span>
         <span class="pill">Itens: {{ stats.total_itens or 0 }}</span>
         <span class="pill">Bipados: {{ stats.total_bipado or 0 }}</span>
@@ -56,7 +56,7 @@
     <div class="sectionHead">
       <div class="sectionTitle">
         <div class="hTitle">Pedidos</div>
-        <div class="sub">Dentro de cada pedido: agrupa “produtos parecidos” e separa kits.</div>
+        <div class="sub">Dentro de cada pedido: agrupa "produtos parecidos" e separa kits.</div>
       </div>
 
       <div class="filter-wrap">
@@ -68,8 +68,6 @@
         </select>
       </div>
     </div>
-
-
 
 <div id="ordersContainer">
 
@@ -84,6 +82,10 @@
 </div>
 
 </div>
+</div>
+
+
+
 {% endblock %}
 
 {% block scripts %}

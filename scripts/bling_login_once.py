@@ -1,3 +1,7 @@
+
+
+
+
 from playwright.sync_api import sync_playwright
 
 LOGIN_URL = "https://www.bling.com.br/login"

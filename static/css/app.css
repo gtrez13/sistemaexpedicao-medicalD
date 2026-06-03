@@ -35,11 +35,18 @@ body{
   font-family:var(--font);
   color:var(--text);
   min-height:100vh;
+  background:#f7f9ff;
+  overflow-x:hidden;
+}
+body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:-1;
   background:
-    radial-gradient(1200px 700px at 10% -20%, rgba(37,99,235,.14), transparent 55%),
-    radial-gradient(900px 650px at 95% -10%, rgba(29,78,216,.10), transparent 60%),
-    linear-gradient(180deg, rgba(255,255,255,.55), rgba(255,255,255,0)),
-    var(--bg);
+    radial-gradient(900px 500px at 10% -10%, rgba(37,99,235,.14), transparent 60%),
+    radial-gradient(700px 450px at 95% -10%, rgba(29,78,216,.10), transparent 60%);
 }
 
 .wrap{ max-width:1220px; }
@@ -63,7 +70,7 @@ body{
   box-shadow: 0 18px 60px rgba(11,27,58,.20);
 }
 
-/* ✅ header fixo sem “descer” */
+/* header fixo sem "descer" */
 .appHeader{
   position: sticky;
   top: 12px;
@@ -76,7 +83,6 @@ body{
   align-items:center;
   justify-content:space-between;
   gap:14px;
-  /* ✅ NÃO quebra linha no desktop */
   flex-wrap: nowrap;
 }
 
@@ -93,7 +99,6 @@ body{
   display:flex;
   align-items:center;
   gap:10px;
-  /* ✅ NÃO quebra no desktop */
   flex-wrap: nowrap;
   min-width: 0;
 }
@@ -114,10 +119,14 @@ body{
   flex: 0 0 auto;
 }
 
+.logoTop{
+  height:34px;
+}
+
 .sub{ margin:0; color:rgba(255,255,255,.78); font-size:.92rem; }
 .cardx:not(.topbar) .sub{ color:var(--muted); }
 
-/* ✅ lado direito do header: nunca “desce”, vira scroll horizontal se precisar */
+/* lado direito do header: nunca "desce", vira scroll horizontal se precisar */
 .brandRowRight{
   display:flex;
   align-items:center;
@@ -186,14 +195,12 @@ body{
   background:rgba(255,255,255,.75);
 }
 
-/* ✅ fora do header pode ficar forte */
 .pill-strong{
   border-color:rgba(37,99,235,.30) !important;
   background:rgba(37,99,235,.10) !important;
   color:var(--navy) !important;
 }
 
-/* ✅ NO HEADER: pill-strong fica branca (pra não ficar preto) */
 .cardx.topbar .pill-strong{
   color:#fff !important;
   border-color:rgba(255,255,255,.22) !important;
@@ -234,7 +241,10 @@ body{
 
 /* ---------- Orders list (Tela 1) ---------- */
 .ordersCard{ padding:0; overflow:hidden; }
-.order{ border-top:1px solid rgba(12,34,74,.08); }
+.order{
+  border-top:1px solid rgba(12,34,74,.08);
+  position:relative;
+}
 .order:first-child{ border-top:none; }
 
 .orderTop{
@@ -318,10 +328,11 @@ body{
 
 .orderBadStock{ border-color:rgba(245,158,11,.35) !important; background:rgba(245,158,11,.10) !important; color:var(--navy) !important; }
 
-/* ✅ VERDINHO: pedido completo */
+/* VERDINHO: pedido completo */
 .done-order{
-  border:1px solid rgba(22,163,74,.25) !important;
-  background:rgba(22,163,74,.06) !important;
+  background:#e6f4ea !important;
+  border:2px solid #16a34a !important;
+  opacity:.85;
 }
 
 /* ---------- Scanner (Tela 2) ---------- */
@@ -406,7 +417,7 @@ body{
   opacity:.95;
 }
 
-/* ✅ VERDINHO: item conferido */
+/* VERDINHO: item conferido */
 .item-row.is-checked,
 .itemRow.is-checked{
   background:rgba(22,163,74,.07);
@@ -444,7 +455,6 @@ body{
   overflow:hidden;
 }
 
-/* cabeçalho do grupo */
 .groupHead{
   display:flex;
   justify-content:space-between;
@@ -456,13 +466,11 @@ body{
   border-bottom:1px solid rgba(37,99,235,.15);
 }
 
-/* título do produto */
 .groupTitle{
   margin:0;
   font-size:.95rem;
 }
 
-/* badge quantidade */
 .groupBadge{
   font-size:.75rem;
   font-weight:800;
@@ -472,47 +480,189 @@ body{
   border-radius:999px;
 }
 
-/* container dos itens */
 .groupBody{
   padding:8px;
 }
 
-/* itens dentro do grupo ficam mais compactos */
 .groupBody .itemRow{
   margin-top:6px;
   background:white;
   border:1px solid rgba(12,34,74,.08);
 }
 
-/* efeito hover */
 .groupBody .itemRow:hover{
   border-color:rgba(37,99,235,.25);
 }
+
 .pedidoRef{
   font-size:11px;
   font-weight:700;
   color:#6b7280;
   margin-bottom:2px;
 }
-.done-order{
-  background:#e6f4ea !important;
-  border:2px solid #16a34a !important;
-  opacity:.85;
+
+/* ---------- Pedido selecionado ---------- */
+.order.selected{
+  border:3px solid #2563eb !important;
+  background:rgba(37,99,235,.10) !important;
+  box-shadow:0 0 0 4px rgba(37,99,235,.25);
+  animation:highlightPedido .6s ease;
+}
+
+.order.selected::before{
+  content:"PEDIDO ATIVO";
+  position:absolute;
+  top:-10px;
+  left:14px;
+  background:#2563eb;
+  color:white;
+  font-size:10px;
+  font-weight:900;
+  padding:3px 8px;
+  border-radius:6px;
+}
+
+/* ---------- Tela Arquivados ---------- */
+.arq-card{
+  background:var(--card-bg);
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:18px 20px;
+  transition: box-shadow 0.15s;
+}
+
+.arq-card:hover{
+  box-shadow: 0 2px 16px rgba(0,0,0,0.15);
+}
+
+.arq-card .obs-input{
+  background:var(--input-bg, rgba(37,99,235, 0.04));
+  border:1px solid var(--border);
+  color:var(--fg);
+  border-radius:8px;
+  font-size:0.85rem;
+}
+
+.arq-card .obs-input:focus{
+  outline:none;
+  border-color:var(--blue, #3b82f6);
+  box-shadow:0 0 0 2px rgba(59,130,246,0.15);
+}
+
+/* ---------- Lock banner (tela 2) ---------- */
+#lockBanner{
+  transition: opacity 0.25s;
+}
+
+/* ---------- Botão arquivar no card (tela 1) ---------- */
+.btn-arquivar-pedido{
+  opacity:0.7;
+  transition: opacity 0.15s;
+}
+
+.btn-arquivar-pedido:hover{
+  opacity:1;
+}
+
+/* ---------- Modal Arquivar ---------- */
+#modalArquivar .modal-content,
+#modalArquivar .modal-dialog .modal-content{
+  background-color:#1a1f2e !important;
+  color:#ffffff !important;
+  border-radius:16px;
+  padding:24px;
+  border:1px solid rgba(255,255,255,0.1);
+}
+
+#modalArquivar .modal-content *,
+#modalArquivar .modal-body *,
+#modalArquivar .titulo-modal,
+#modalArquivar .pedido-id{
+  color:#ffffff !important;
+}
+
+#modalArquivar label{
+  color:#60a5fa !important;
+  font-weight:600;
+  display:block;
+  margin-top:15px;
+  margin-bottom:8px;
+}
+
+#modalArquivar textarea{
+  background:rgba(0, 0, 0, 0.25) !important;
+  border:1.5px solid rgba(255, 255, 255, 0.1) !important;
+  color:#ffffff !important;
+  border-radius:10px;
+  padding:12px;
+  width:100%;
+  min-height:100px;
+}
+
+#modalArquivar textarea::placeholder{
+  color:#94a3b8 !important;
+  opacity:0.8;
+}
+
+#modalArquivar .btn-cancelar{
+  background:rgba(255,255,255,0.05) !important;
+  border:1px solid #475569 !important;
+  color:#94a3b8 !important;
+  padding:10px 20px;
+  border-radius:8px;
+}
+
+#modalArquivar .btn-confirmar-arquivar{
+  background:#fbbf24 !important;
+  color:#000000 !important;
+  font-weight:800 !important;
+  border:none !important;
+  padding:10px 24px;
+  border-radius:8px;
+}
+
+#modalArquivar .btn-confirmar-arquivar:hover{
+  background:#f59e0b !important;
+  transform:translateY(-1px);
+}
+
+/* ---------- Animações ---------- */
+@keyframes highlightPedido{
+  0%{ box-shadow:0 0 0 0 rgba(37,99,235,.5); }
+  100%{ box-shadow:0 0 0 10px rgba(37,99,235,0); }
+}
+
+.itemRow.flash{
+  animation:bipFlash .35s;
+}
+
+@keyframes bipFlash{
+  0%{ background:#dbeafe; }
+  100%{ background:transparent; }
+}
+
+/* ---------- Centralização ---------- */
+.container.wrap{
+  margin-left:auto;
+  margin-right:auto;
+}
+
+.wrap{
+  max-width:1220px;
+  margin:auto;
 }
 
 .badge-stock.is-warn{ border-color:rgba(245,158,11,.30); background:rgba(245,158,11,.10); }
 .badge-stock.is-bad{ border-color:rgba(239,68,68,.28); background:rgba(239,68,68,.10); }
 
 
-/* ---------- Mobile (primeira tela MUITO boa) ---------- */
+/* ---------- Mobile ---------- */
 @media (max-width: 760px){
   .wrap{ padding-left:12px; padding-right:12px; }
 
   .cardx{ padding:14px; border-radius:16px; }
   .cardx.topbar{ padding:14px; }
 
-  /* ✅ header no mobile: permite quebrar texto do lado esquerdo,
-     mas o menu não desce: vira scroll horizontal */
   .brandRow{ flex-wrap: wrap; align-items:flex-start; }
   .brandLeft{ width:100%; }
   .brand{
@@ -528,7 +678,6 @@ body{
     padding-top: 6px;
   }
 
-  /* ✅ botões do scanner em 2 colunas bonitas */
   .scanCard .d-flex[style*="min-width"]{
     width:100%;
     min-width:0 !important;
@@ -538,7 +687,6 @@ body{
     justify-content:center;
   }
 
-  /* filtro ocupa tudo */
   .filter-wrap{ width:100%; }
   .filter-wrap .form-select{ width:100% !important; }
 
@@ -552,10 +700,10 @@ body{
     gap:12px;
   }
 }
+
 /* ================= MOBILE PICKING MODE ================= */
 @media (max-width: 760px){
 
-  /* tela vira app */
   body{
     background:#f4f6fb;
   }
@@ -564,14 +712,14 @@ body{
     padding:8px !important;
   }
 
-  /* pedido vira cartão grande */
   .order{
+    border-top:1px solid rgba(12,34,74,.08);
+    position:relative;
     border-radius:18px;
     margin-bottom:14px;
     box-shadow:0 8px 22px rgba(0,0,0,.08);
   }
 
-  /* header do pedido */
   .orderTop{
     flex-direction:column;
     gap:6px;
@@ -586,7 +734,6 @@ body{
     font-size:.95rem;
   }
 
-  /* progresso gigante */
   .progress-pill{
     font-size:1rem !important;
     padding:8px 12px !important;
@@ -594,7 +741,6 @@ body{
     justify-content:center;
   }
 
-  /* itens viram blocos verticais */
   .itemRow{
     flex-direction:column;
     gap:6px;
@@ -602,19 +748,16 @@ body{
     border-radius:14px;
   }
 
-  /* nome do produto grande */
   .itemName{
     font-size:1.05rem;
     line-height:1.25;
   }
 
-  /* SKU grande pra leitura rápida */
   .sku{
     font-size:.95rem;
     padding:4px 8px;
   }
 
-  /* qtd + bip em linha separada */
   .itemRight{
     flex-direction:row;
     justify-content:space-between;
@@ -627,78 +770,65 @@ body{
     font-weight:900;
   }
 
-  /* item conferido MUITO visível */
   .itemRow.is-checked{
     background:#e8f7ee !important;
     border:2px solid #22c55e !important;
   }
 
-  /* pedido completo bem visível */
   .done-order{
     background:#e6f4ea !important;
     border:2px solid #16a34a !important;
   }
 
-  /* kits destacados */
   .kitBox{
     padding:10px;
     font-size:.95rem;
   }
 
-  /* =========================
-   AGRUPAMENTO DE PRODUTOS
-   ========================= */
+  .groupBlock{
+    margin-top:14px;
+    border-radius:14px;
+    border:1px solid rgba(37,99,235,.15);
+    background:rgba(37,99,235,.04);
+    overflow:hidden;
+  }
 
-.groupBlock{
-  margin-top:14px;
-  border-radius:14px;
-  border:1px solid rgba(37,99,235,.15);
-  background:rgba(37,99,235,.04);
-  overflow:hidden;
-}
+  .groupHead{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:10px 12px;
+    font-weight:900;
+    color:var(--navy);
+    background:rgba(37,99,235,.08);
+    border-bottom:1px solid rgba(37,99,235,.15);
+  }
 
-/* cabeçalho do grupo */
-.groupHead{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  padding:10px 12px;
-  font-weight:900;
-  color:var(--navy);
-  background:rgba(37,99,235,.08);
-  border-bottom:1px solid rgba(37,99,235,.15);
-}
+  .groupTitle{
+    margin:0;
+    font-size:.95rem;
+  }
 
-/* título do produto */
-.groupTitle{
-  margin:0;
-  font-size:.95rem;
-}
+  .groupBadge{
+    font-size:.75rem;
+    font-weight:800;
+    background:#2563eb;
+    color:white;
+    padding:3px 8px;
+    border-radius:999px;
+  }
 
-/* badge quantidade */
-.groupBadge{
-  font-size:.75rem;
-  font-weight:800;
-  background:#2563eb;
-  color:white;
-  padding:3px 8px;
-  border-radius:999px;
-}
+  .groupBody{
+    padding:8px;
+  }
 
-/* container dos itens */
-.groupBody{
-  padding:8px;
-}
+  .groupBody .itemRow{
+    margin-top:6px;
+    background:white;
+    border:1px solid rgba(12,34,74,.08);
+  }
 
-/* itens dentro do grupo ficam mais compactos */
-.groupBody .itemRow{
-  margin-top:6px;
-  background:white;
-  border:1px solid rgba(12,34,74,.08);
-}
-
-/* efeito hover */
-.groupBody .itemRow:hover{
-  border-color:rgba(37,99,235,.25);
-}
+  .groupBody .itemRow:hover{
+    border-color:rgba(37,99,235,.25);
+  }
 }
